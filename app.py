@@ -23,6 +23,7 @@ import io
 import json
 import mimetypes
 import os
+import re
 import subprocess
 import sys
 import traceback
@@ -104,8 +105,11 @@ def export_dir(name: str) -> Path:
 
 
 def output_file(name: str, file: str) -> Path:
+    # Only tiles of this photo: the output folder can point anywhere, so never serve other files from it.
+    stem, suffix = Path(name).stem, Path(name).suffix
+    tile = re.fullmatch(rf"{re.escape(stem)}_\d+of\d+{re.escape(suffix)}", file)
     path = export_dir(name) / file
-    if Path(file).name != file or not path.is_file():
+    if suffix.lower() not in splitter.SUFFIXES or not tile or not path.is_file():
         raise ValueError(f"No exported tile named {file!r}")
     return path
 

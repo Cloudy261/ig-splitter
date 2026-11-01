@@ -101,6 +101,14 @@ class ApiTest(unittest.TestCase):
         (self.root / "secret.txt").write_text("not a tile")
         for path in ("/api/download?name=..&file=secret.txt", "/api/zip?name=..&file=secret.txt"):
             self.assertEqual(self.request("GET", path)[0], 400, path)
+        # only tiles are served, even if the output folder points at e.g. the home folder
+        (self.root / "out" / ".ssh").mkdir()
+        (self.root / "out" / ".ssh" / "id_ed25519").write_text("private key")
+        (self.root / "out" / ".ssh" / ".ssh_1of2.txt").write_text("not an image")
+        for query in ("name=.ssh.x&file=id_ed25519", "name=.ssh.jpg&file=id_ed25519",
+                      "name=.ssh.txt&file=.ssh_1of2.txt"):
+            for route in ("download", "zip"):
+                self.assertEqual(self.request("GET", f"/api/{route}?{query}")[0], 400, f"{route} {query}")
 
     def test_rejects_invalid_content_length(self):
         # a negative length made the server read until the client stopped sending (open to everyone via login)
