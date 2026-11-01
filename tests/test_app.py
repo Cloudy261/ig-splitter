@@ -6,6 +6,7 @@ Run with: python3 -m unittest discover tests
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -47,12 +48,11 @@ class ApiTest(unittest.TestCase):
         self._tmp.cleanup()
 
     def request(self, method, path, body=None, headers=None, host=None):
-        conn = HTTPConnection("127.0.0.1", self.server.server_port)
+        conn = HTTPConnection("127.0.0.1", self.server.server_port, timeout=10)
         conn.putrequest(method, path, skip_host=True)
         conn.putheader("Host", host or f"127.0.0.1:{self.server.server_port}")
-        for key, value in (headers or {}).items():
+        for key, value in {"Content-Length": str(len(body or b"")), **(headers or {})}.items():
             conn.putheader(key, value)
-        conn.putheader("Content-Length", str(len(body or b"")))
         conn.endheaders(body)
         res = conn.getresponse()
         return res.status, res.read(), dict(res.getheaders())
@@ -96,6 +96,24 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(list((self.root / "in").iterdir()), [])
         status, _, _ = self.request("GET", "/api/download?name=a.jpg&file=..%2F..%2Fetc%2Fpasswd")
         self.assertEqual(status, 400)
+        # ".." as the photo name would point one level above the output folder
+        (self.root / "out").mkdir()
+        (self.root / "secret.txt").write_text("not a tile")
+        for path in ("/api/download?name=..&file=secret.txt", "/api/zip?name=..&file=secret.txt"):
+            self.assertEqual(self.request("GET", path)[0], 400, path)
+
+    def test_rejects_invalid_content_length(self):
+        # a negative length made the server read until the client stopped sending (open to everyone via login)
+        for length in ("-1", "abc"):
+            status, _, _ = self.request("POST", "/api/login", b"{}",
+                                        {"Content-Type": "application/json", "Content-Length": length})
+            self.assertEqual(status, 400, length)
+
+    def test_drops_silent_connections(self):
+        self.assertTrue(app.Handler.timeout)
+        with mock.patch.object(app.Handler, "timeout", 0.2), \
+                socket.create_connection(("127.0.0.1", self.server.server_port), timeout=5) as conn:
+            self.assertEqual(conn.recv(1), b"")  # closed by the server, long before our own timeout
 
     def test_guards_against_other_sites(self):
         self.assertEqual(self.request("GET", "/api/health", host="evil.example")[0], 403)
@@ -139,6 +157,8 @@ class LoginTest(ApiTest):
         self.assertEqual(auth.hash_password("x" * 12).split(":")[1], "1000000")
         with self.assertRaises(ValueError):
             auth.Auth("pbkdf2-sha256:1000:abc:def")  # too few iterations
+        with self.assertRaises(ValueError):
+            auth.Auth(stored[:-3])  # cut off while pasting: still decodes, but to a 30-byte digest
 
     def test_everything_but_the_login_needs_a_session(self):
         status, body, _ = self.get("/api/images")
@@ -176,19 +196,28 @@ class LoginTest(ApiTest):
 
     def test_login_can_be_turned_off(self):
         with mock.patch.dict(os.environ, {app.PASSWORD_ENV: self.password_hash()}):
-            self.assertTrue(app.login_gate("0.0.0.0", no_login=False).enabled)
-            self.assertFalse(app.login_gate("0.0.0.0", no_login=True).enabled)
+            self.assertTrue(app.login_gate("0.0.0.0").enabled)
             with mock.patch.dict(os.environ, {app.LOGIN_ENV: "off"}):
-                self.assertFalse(app.login_gate("0.0.0.0", no_login=False).enabled)
+                self.assertFalse(app.login_gate("0.0.0.0").enabled)
         with mock.patch.dict(os.environ, {app.LOGIN_ENV: "maybe"}), self.assertRaises(SystemExit):
-            app.login_gate("127.0.0.1", no_login=False)
+            app.login_gate("127.0.0.1")
+
+    def run_app(self, **env):
+        """Start app.py with these environment changes (None removes a variable); it should exit."""
+        env = {k: v for k, v in {**os.environ, **env}.items() if v is not None}
+        return subprocess.run([sys.executable, str(Path(app.__file__)), "--no-browser"],
+                              env=env, capture_output=True, text=True, timeout=30)
 
     def test_refuses_to_listen_on_the_network_without_a_password(self):
-        env = {k: v for k, v in os.environ.items() if k not in (app.PASSWORD_ENV, app.LOGIN_ENV)}
-        proc = subprocess.run([sys.executable, str(Path(app.__file__)), "--host", "0.0.0.0", "--no-browser"],
-                              env=env, capture_output=True, text=True, timeout=30)
+        proc = self.run_app(**{app.LISTEN_ENV: "0.0.0.0", app.PASSWORD_ENV: None, app.LOGIN_ENV: None})
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("without a login", proc.stderr)
+
+    def test_refuses_to_listen_on_the_network_without_fixed_folders(self):
+        # otherwise anyone who can use the app could point its folders anywhere on the machine
+        proc = self.run_app(**{app.LISTEN_ENV: "0.0.0.0", app.LOGIN_ENV: "off", "IG_SPLITTER_OUTPUT": None})
+        self.assertNotEqual(proc.returncode, 0)
+        self.assertIn("needs fixed folders", proc.stderr)
 
 
 if __name__ == "__main__":

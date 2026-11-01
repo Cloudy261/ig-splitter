@@ -4,13 +4,16 @@
 Run `python3 app.py`; the UI opens at http://localhost:8765.
 
 Environment (used by the Docker image):
-  IG_SPLITTER_INPUT / IG_SPLITTER_OUTPUT  fix the folders (the UI can't change them then)
+  IG_SPLITTER_LISTEN                      address to listen on, set by the Docker image only;
+                                          without it the app is only reachable from this computer
+  IG_SPLITTER_INPUT / IG_SPLITTER_OUTPUT  fix the folders (the UI can't change them then);
+                                          mandatory when listening beyond localhost
   IG_SPLITTER_HOSTS                       extra host names the UI may be opened with,
                                           comma-separated (e.g. "192.168.1.20,photos.local")
   IG_SPLITTER_PASSWORD_HASH               require a login (create it with --hash-password);
                                           mandatory when listening beyond localhost
   IG_SPLITTER_LOGIN                       "on" (default) or "off": off never asks for a
-                                          password, also on the network (same as --no-login)
+                                          password, also on the network
 """
 
 import argparse
@@ -43,6 +46,7 @@ DEFAULT_CONFIG = {
 FOLDER_ENV = {"input_dir": "IG_SPLITTER_INPUT", "output_dir": "IG_SPLITTER_OUTPUT"}
 PASSWORD_ENV = "IG_SPLITTER_PASSWORD_HASH"
 LOGIN_ENV = "IG_SPLITTER_LOGIN"
+LISTEN_ENV = "IG_SPLITTER_LISTEN"
 LOGIN_VALUES = {"on": True, "true": True, "yes": True, "1": True, "off": False, "false": False, "no": False, "0": False}
 LOOPBACK = ("127.0.0.1", "localhost", "::1")
 OPEN_PATHS = {"/", "/api/health", "/api/session", "/api/login"}  # everything else needs a login
@@ -90,9 +94,18 @@ def input_file(name: str) -> Path:
     return path
 
 
+def export_dir(name: str) -> Path:
+    """Folder for the tiles of photo `name`, always directly inside the output folder."""
+    base = folder("output_dir").resolve()
+    path = (base / Path(name).stem).resolve()
+    if Path(name).name != name or path.parent != base:  # e.g. ".." or "...jpg"
+        raise ValueError(f"Not a valid photo name: {name!r}")
+    return path
+
+
 def output_file(name: str, file: str) -> Path:
-    path = folder("output_dir") / Path(name).stem / file
-    if Path(name).name != name or Path(file).name != file or not path.is_file():
+    path = export_dir(name) / file
+    if Path(file).name != file or not path.is_file():
         raise ValueError(f"No exported tile named {file!r}")
     return path
 
@@ -141,12 +154,12 @@ def pick_folder(start: Path) -> str | None:
     return proc.stdout.strip().rstrip("/") or "/"
 
 
-def login_gate(host: str, no_login: bool) -> auth.Auth:
+def login_gate(host: str) -> auth.Auth:
     """The server's login, from the environment; exits on an invalid or unsafe setup."""
     setting = (os.environ.get(LOGIN_ENV) or "on").strip().lower()
     if setting not in LOGIN_VALUES:
         sys.exit(f"{LOGIN_ENV} must be on or off, not {setting!r}")
-    if no_login or not LOGIN_VALUES[setting]:
+    if not LOGIN_VALUES[setting]:
         return auth.Auth(None)
     try:
         gate = auth.Auth(os.environ.get(PASSWORD_ENV))
@@ -154,7 +167,7 @@ def login_gate(host: str, no_login: bool) -> auth.Auth:
         sys.exit(f"{PASSWORD_ENV}: {e}")
     if not gate.enabled and host not in LOOPBACK:
         sys.exit(f"Refusing to listen on {host} without a login. Run `python3 app.py --hash-password` and put "
-                 f"the result into {PASSWORD_ENV}, or turn the login off with {LOGIN_ENV}=off / --no-login.")
+                 f"the result into {PASSWORD_ENV}, or turn the login off with {LOGIN_ENV}=off.")
     return gate
 
 
@@ -164,6 +177,8 @@ def cached_preview(path: str, mtime: int, size: int) -> bytes:
 
 
 class Handler(BaseHTTPRequestHandler):
+    timeout = 60  # seconds a connection may stay silent before it's dropped
+
     def do_GET(self):
         url = urlparse(self.path)
         params = parse_qs(url.query)
@@ -211,7 +226,10 @@ class Handler(BaseHTTPRequestHandler):
         expected = "application/octet-stream" if path == "/api/upload" else "application/json"
         if self.headers.get("Content-Type", "").split(";")[0].strip() != expected:
             return self._send(415, b"Unsupported content type", "text/plain")
-        length = int(self.headers.get("Content-Length", 0))
+        length = self.headers.get("Content-Length", "0").strip()
+        if not (length.isascii() and length.isdigit()):  # a negative length would read until the client stops
+            return self._send(400, b"Invalid Content-Length", "text/plain")
+        length = int(length)
         if path != "/api/upload" and length > 65536:  # /api/login is open, keep its bodies small
             return self._send(413, b"Request too large", "text/plain")
         try:
@@ -236,14 +254,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({**public_config(), "cancelled": not chosen})
             if path == "/api/split":
                 src = input_file(body["name"])
-                out_dir = folder("output_dir") / src.stem
+                out_dir = export_dir(src.name)
                 outs = splitter.split(src, body["rect"], int(body["tiles"]), out_dir,
                                       border=body.get("border"), size=body.get("size"))
                 return self._json({"dir": str(out_dir), "files": [p.name for p in outs]})
             if path == "/api/reveal":
                 if not public_config()["can_reveal"]:
                     raise ValueError("Only available when the app runs on your Mac")
-                subprocess.run(["open", str(folder("output_dir") / input_file(body["name"]).stem)], check=True)
+                subprocess.run(["open", str(export_dir(input_file(body["name"]).name))], check=True)
                 return self._json({})
             self._send(404, b"Not found", "text/plain")
         except Exception as e:
@@ -320,11 +338,8 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--host", default="127.0.0.1", help="address to listen on (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-browser", action="store_true", help="don't open the browser")
-    parser.add_argument("--no-login", action="store_true",
-                        help=f"never ask for a password, also on the network (same as {LOGIN_ENV}=off)")
     parser.add_argument("--hash-password", action="store_true",
                         help=f"ask for a password and print the hash for {PASSWORD_ENV}")
     args = parser.parse_args()
@@ -338,22 +353,26 @@ def main():
         print(auth.hash_password(password))
         return
 
-    gate = login_gate(args.host, args.no_login)
+    host = os.environ.get(LISTEN_ENV) or "127.0.0.1"
+    gate = login_gate(host)
+    if host not in LOOPBACK and len(fixed_folders()) < len(FOLDER_ENV):
+        # Otherwise anyone who can use the app could point its folders anywhere on this machine.
+        sys.exit(f"Listening on {host} needs fixed folders: set {' and '.join(FOLDER_ENV.values())}.")
 
     config = load_config()
     for key in DEFAULT_CONFIG:  # create the default folders on first run
         if config[key] == DEFAULT_CONFIG[key]:
             folder(key).mkdir(parents=True, exist_ok=True)
 
-    server = ThreadingHTTPServer((args.host, args.port), Handler)
+    server = ThreadingHTTPServer((host, args.port), Handler)
     server.auth = gate
     url = f"http://localhost:{args.port}"
     print(f"IG Splitter running at {url}  (Ctrl+C to stop)", flush=True)
     print(f"Input folder:  {folder('input_dir')}", flush=True)
     print(f"Output folder: {folder('output_dir')}", flush=True)
     print(f"Login: {'required' if gate.enabled else 'off'}", flush=True)
-    if not gate.enabled and args.host not in LOOPBACK:
-        print(f"Warning: the login is off, so anyone who can reach {args.host}:{args.port} can use the app.",
+    if not gate.enabled and host not in LOOPBACK:
+        print(f"Warning: the login is off, so anyone who can reach {host}:{args.port} can use the app.",
               flush=True)
     if not args.no_browser:
         webbrowser.open(url)

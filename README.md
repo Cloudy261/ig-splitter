@@ -78,8 +78,9 @@ pip install -r requirements.txt
 python3 app.py
 ```
 
-Your browser opens http://localhost:8765. No login is needed, because the app only listens on
-`localhost`. Stop it with `Ctrl+C`.
+Your browser opens http://localhost:8765. Stop it with `Ctrl+C`. The app only listens on
+`localhost`, so no other device can reach it and no login is needed. To use it from your phone or
+another computer, run it with [Docker](#quick-start-docker) instead.
 
 Useful flags:
 
@@ -87,36 +88,13 @@ Useful flags:
 |---|---|
 | `--port 9000` | use another port (default `8765`) |
 | `--no-browser` | don't open the browser |
-| `--host 0.0.0.0` | listen on the network as well (see below) |
-| `--no-login` | never ask for a password, also on the network |
-| `--hash-password` | create a password hash for the login and exit |
+| `--hash-password` | create a password hash for the Docker login and exit |
 
 Photos and tiles go into these folders, which are created on first start. You can change them
 in the app under **Folders**.
 
 - Input: `~/Pictures/ig-splitter/input`
 - Output: `~/Pictures/ig-splitter/output/<photo name>/<name>_1of3.jpg`, …
-
-### Reaching the Python version from other devices
-
-To open the app from your phone or another computer, make it listen on the network. You also
-have to decide about the login. With a password:
-
-```bash
-python3 app.py --hash-password            # asks for a password, prints pbkdf2-sha256:…
-export IG_SPLITTER_PASSWORD_HASH='pbkdf2-sha256:…'   # the line it printed
-export IG_SPLITTER_HOSTS=192.168.1.20     # your computer's IP or host name
-python3 app.py --host 0.0.0.0 --no-browser
-```
-
-Or, on a network you trust, without a password:
-
-```bash
-export IG_SPLITTER_HOSTS=192.168.1.20
-python3 app.py --host 0.0.0.0 --no-browser --no-login
-```
-
-Then open `http://192.168.1.20:8765` on the other device.
 
 ## Quick start: Docker
 
@@ -186,15 +164,15 @@ root file system, and memory, CPU and process limits.
 
 ## Login
 
-The login is a single password. It's **on by default** and is required as soon as the app
-listens on the network.
+The login is a single password. It's **on by default** and is required in Docker, the only
+setup that listens on the network.
 
 | Setup | Result |
 |---|---|
 | `python3 app.py` (localhost only), no hash | no login |
 | any setup with `IG_SPLITTER_PASSWORD_HASH` set | login required |
-| listening on the network (Docker, `--host 0.0.0.0`), no hash | **refuses to start** and tells you what to do |
-| `IG_SPLITTER_LOGIN=off` or `--no-login` | no login, even with a hash set; prints a warning on the network |
+| Docker, no hash | **refuses to start** and tells you what to do |
+| `IG_SPLITTER_LOGIN=off` | no login, even with a hash set; prints a warning in Docker |
 
 How it works:
 
@@ -215,7 +193,7 @@ Everything is set with environment variables (in Docker: in `.env`).
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `IG_SPLITTER_LOGIN` | `on` | `on` or `off`. `off` turns the login off completely. Same as `--no-login`. |
+| `IG_SPLITTER_LOGIN` | `on` | `on` or `off`. `off` turns the login off completely. |
 | `IG_SPLITTER_PASSWORD_HASH` | empty | Login password hash from `--hash-password`. |
 | `IG_SPLITTER_HOSTS` | empty | Extra host names / IPs the UI may be opened with, comma-separated. `localhost` and `127.0.0.1` always work. |
 | `IG_SPLITTER_INPUT`, `IG_SPLITTER_OUTPUT` | `~/Pictures/ig-splitter/…` (Docker: `/data/…`) | Fix the folders. The UI can't change them then. |
@@ -293,13 +271,13 @@ Not carried over in either mode: HDR gain maps (Ultra HDR / iPhone HDR JPEGs).
 | Symptom | Cause / fix |
 |---|---|
 | `Forbidden: unknown host name` | Add the host name or IP you opened it with to `IG_SPLITTER_HOSTS`, then restart. |
-| `Refusing to listen on 0.0.0.0 without a login` | Set `IG_SPLITTER_PASSWORD_HASH`, or turn the login off with `IG_SPLITTER_LOGIN=off` / `--no-login`. In Docker, the container keeps restarting until you do; check `docker compose logs`. |
+| `Refusing to listen on 0.0.0.0 without a login` | Set `IG_SPLITTER_PASSWORD_HASH`, or turn the login off with `IG_SPLITTER_LOGIN=off`. The container keeps restarting until you do; check `docker compose logs`. |
 | `Not a valid password hash` | The hash was cut off or has extra quotes. Paste the full `pbkdf2-sha256:…` line again. |
 | `` `jpegtran` not found `` | Install libjpeg-turbo (see the table above), or keep the Instagram-size export on. |
 | Export fails with `Permission denied` (Docker) | The data folders aren't writable by UID 1000. Run `sudo chown -R 1000:1000 data`. |
 | A huge 16-bit PNG fails with `cache resources exhausted` | Raise `mem_limit` and the `/tmp` size in `docker-compose.yml`. Outside Docker, your ImageMagick `policy.xml` limits may be too low. |
 | "Too many attempts" | Wait 15 minutes, or restart the app. |
-| Other devices can't connect | Check the server's firewall for port 8765, and that the app listens on the network (`--host 0.0.0.0`, or Docker). |
+| Other devices can't connect | Run it with Docker (plain `python3 app.py` only listens on localhost), and check the server's firewall for port 8765. |
 
 ## Development
 

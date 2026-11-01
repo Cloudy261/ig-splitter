@@ -56,9 +56,11 @@ def verify_password(password: str, stored: str) -> bool:
 def _parse(stored: str) -> tuple[str, int, bytes, bytes]:
     try:
         prefix, iterations, salt, digest = stored.strip().split(":")
-        if prefix != _PREFIX or int(iterations) < 100_000:
+        salt, digest = _unb64(salt), _unb64(digest)
+        # A hash cut off while pasting would still verify, against a much shorter digest.
+        if prefix != _PREFIX or int(iterations) < 100_000 or len(salt) < 16 or len(digest) != 32:
             raise ValueError
-        return prefix, int(iterations), _unb64(salt), _unb64(digest)
+        return prefix, int(iterations), salt, digest
     except ValueError:
         raise ValueError("Not a valid password hash; create one with: python3 app.py --hash-password") from None
 

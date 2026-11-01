@@ -18,10 +18,11 @@ RUN useradd --uid 1000 --no-create-home --shell /usr/sbin/nologin app
 USER 1000:1000
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    IG_SPLITTER_LISTEN=0.0.0.0 \
     IG_SPLITTER_INPUT=/data/input \
     IG_SPLITTER_OUTPUT=/data/output
 
 EXPOSE 8765
 HEALTHCHECK --interval=60s --timeout=5s \
   CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health', timeout=4)"]
-CMD ["python", "app.py", "--host", "0.0.0.0", "--port", "8765", "--no-browser"]
+CMD ["python", "app.py", "--port", "8765", "--no-browser"]
