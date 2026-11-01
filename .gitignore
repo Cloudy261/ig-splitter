@@ -1,0 +1,9 @@
+# local working files
+DEVLOG.md
+config.json
+.env
+data/
+
+# Python
+__pycache__/
+.venv/

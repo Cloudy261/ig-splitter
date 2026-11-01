@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IG Splitter</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <aside id="library">
+    <header class="brand"><span class="logo"></span>IG Splitter<button id="logout" class="icon" title="Log out" hidden>Log out</button></header>
+
+    <details id="folders">
+      <summary>Folders</summary>
+      <label>Input
+        <span class="folder-row"><input id="input-dir" spellcheck="false" autocomplete="off"><button class="browse" data-key="input_dir" title="Choose in Finder">Browse…</button></span>
+      </label>
+      <label>Output
+        <span class="folder-row"><input id="output-dir" spellcheck="false" autocomplete="off"><button class="browse" data-key="output_dir" title="Choose in Finder">Browse…</button></span>
+      </label>
+      <button id="save-folders">Save folders</button>
+      <p id="folders-msg" class="msg"></p>
+    </details>
+
+    <div class="library-head">
+      <span id="input-path" class="path"></span>
+      <button id="refresh" class="icon" title="Reload folder">↻</button>
+    </div>
+    <div class="add-row">
+      <button id="add-photos">+ Add photos</button>
+      <input id="file-input" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" multiple hidden>
+    </div>
+    <ul id="gallery"></ul>
+  </aside>
+
+  <main id="stage">
+    <div id="image-meta" class="meta"></div>
+    <div id="empty" class="empty">
+      <p>Drop JPEG or PNG photos here or put them into your input folder,<br>then pick one on the left.</p>
+    </div>
+    <div id="canvas" hidden>
+      <div id="pad"></div>
+      <img id="preview" alt="">
+      <div id="shade-clip"><div id="shade"></div></div>
+      <div id="frame">
+        <div id="tiles"></div>
+        <div id="frame-label"></div>
+        <div class="handle corner" data-h="nw"></div>
+        <div class="handle corner" data-h="ne"></div>
+        <div class="handle corner" data-h="se"></div>
+        <div class="handle corner" data-h="sw"></div>
+        <div class="handle edge-x" data-h="n"></div>
+        <div class="handle edge-x" data-h="s"></div>
+        <div class="handle edge-y" data-h="e"></div>
+        <div class="handle edge-y" data-h="w"></div>
+      </div>
+    </div>
+    <div id="banner" hidden>
+      <span id="banner-text"></span>
+      <button id="banner-fix" class="primary"></button>
+      <button id="banner-dismiss">Not now</button>
+    </div>
+  </main>
+
+  <aside id="controls">
+    <section>
+      <h2>Tiles</h2>
+      <div class="stepper">
+        <button id="n-minus" aria-label="Fewer tiles">−</button>
+        <input id="n" type="number" min="2" max="20" value="3" aria-label="Number of tiles">
+        <button id="n-plus" aria-label="More tiles">+</button>
+      </div>
+      <div id="hint" hidden></div>
+    </section>
+
+    <section>
+      <h2>Tile format</h2>
+      <label class="toggle"><input type="checkbox" id="check" checked><span></span>Check Instagram ratio</label>
+      <div class="segmented" id="ratio">
+        <button data-ratio="3:4" class="on">3:4 portrait</button>
+        <button data-ratio="4:3">4:3 landscape</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Frame</h2>
+      <div class="segmented" id="fill">
+        <button data-fill="crop" class="on">Crop</button>
+        <button data-fill="pad">Add border</button>
+      </div>
+      <div id="border-row" class="swatches" hidden>
+        <span>Border</span>
+        <button class="swatch" data-color="#ffffff" style="background:#ffffff" title="White"></button>
+        <button class="swatch" data-color="#000000" style="background:#000000" title="Black"></button>
+        <input id="border-color" type="color" value="#ffffff" title="Custom colour">
+      </div>
+      <label class="toggle"><input type="checkbox" id="magnet" checked><span></span>Magnet: snap to valid sizes</label>
+      <div class="fields">
+        <label>X<input id="fx" type="number"></label>
+        <label>Y<input id="fy" type="number"></label>
+        <label>W<input id="fw" type="number" min="1"></label>
+        <label>H<input id="fh" type="number" min="1"></label>
+      </div>
+      <div class="row">
+        <button id="best-fit">Best fit</button>
+        <button id="full">Full image</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Checks</h2>
+      <ul id="checks"><li class="info"><div>No image selected</div></li></ul>
+    </section>
+
+    <section class="export">
+      <h2>Export</h2>
+      <label class="toggle"><input type="checkbox" id="ig-size" checked><span></span><span id="ig-size-label">Instagram size (1080 × 1440)</span></label>
+      <p id="ig-size-note" class="note"></p>
+      <div class="row">
+        <button id="preview-carousel" disabled>Preview swipe</button>
+      </div>
+      <button id="export" class="primary big" disabled>Export tiles</button>
+      <div id="result"></div>
+    </section>
+  </aside>
+
+  <div id="drop-overlay" hidden><p>Drop photos to add them to the input folder</p></div>
+
+  <div id="login" hidden>
+    <form id="login-form">
+      <div class="brand"><span class="logo"></span>IG Splitter</div>
+      <input type="text" name="username" value="ig-splitter" autocomplete="username" hidden>
+      <input id="login-password" type="password" autocomplete="current-password" placeholder="Password" required>
+      <button class="primary big" type="submit">Log in</button>
+      <p id="login-msg" class="msg bad"></p>
+    </form>
+  </div>
+
+  <dialog id="dialog">
+    <p id="dialog-text"></p>
+    <div class="row" id="dialog-buttons"></div>
+  </dialog>
+
+  <dialog id="carousel">
+    <div class="phone">
+      <div class="phone-head"><span class="avatar"></span><b>your.account</b><span id="slide-count"></span></div>
+      <div id="slides"></div>
+      <div id="dots"></div>
+    </div>
+    <div class="row">
+      <button id="slide-prev" aria-label="Previous tile">‹</button>
+      <button id="carousel-close">Close</button>
+      <button id="slide-next" aria-label="Next tile">›</button>
+    </div>
+  </dialog>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

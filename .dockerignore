@@ -1,0 +1,8 @@
+.git
+.claude
+__pycache__
+tests
+config.json
+*.md
+.env
+data
